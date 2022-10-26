@@ -7,7 +7,7 @@ const INTERNAL_DIR := "res://addons/GitProjectData"
 const EXTERNAL_DIR := "user://GitProjectData"
 const GH_TOKEN_PATH := "res://addons/GitProjectData/GH_TOKEN.cfg"
 const GH_USERNAME := "ACB-prgm"
-const GH_REPO := "LiveStreamGamez.nosync"
+const GH_REPO := "GitDataPlugin"
 
 var INTERNAL_DATA := INTERNAL_DIR.plus_file("ProjectData")
 #var INTERNAL_COMMIT := INTERNAL_DIR.plus_file("GitProjectData")
@@ -116,7 +116,6 @@ func store_commit(commit:String) -> void:
 
 
 func is_new_version() -> bool:
-	print(GH_TOKEN)
 	var stored_commit = get_stored_commit()
 	var git_commit = yield(get_latest_commit(GH_TOKEN), "completed")
 
@@ -128,11 +127,14 @@ func is_new_version() -> bool:
 
 
 func refresh_dir() -> void:
+	if GH_TOKEN == "restart":
+		get_gh_token()
+	
 	if yield(is_new_version(), "completed"):
-		print("copy int to ext")
+#		print("copy int to ext")
 		copy_dir(INTERNAL_DATA, EXTERNAL_DATA)
 	else:
-		print("copy ext to int")
+#		print("copy ext to int")
 		copy_dir(EXTERNAL_DATA, INTERNAL_DATA)
 
 
