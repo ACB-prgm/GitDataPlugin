@@ -2,25 +2,25 @@ tool
 extends EditorPlugin
 
 
-const REFRESH_RATE := 5 # refresh every X seconds, API rate limit is 5k/hour
+const REFRESH_RATE := 2 # refresh every X seconds, API rate limit is 5k/hour
 const INTERNAL_DIR := "res://addons/GitProjectData"
 const EXTERNAL_DIR := "user://GitProjectData"
 const GH_TOKEN_PATH := "res://addons/GitProjectData/GH_TOKEN.cfg"
-const GH_USERNAME := "ACB-prgm"
-const GH_REPO := "GitDataPlugin"
 
 var INTERNAL_DATA := INTERNAL_DIR.plus_file("ProjectData")
 #var INTERNAL_COMMIT := INTERNAL_DIR.plus_file("GitProjectData")
 var EXTERNAL_DATA := EXTERNAL_DIR.plus_file("ProjectData")
 var EXTERNAL_COMMIT := EXTERNAL_DIR.plus_file("commit.cfg")
-var GH_TOKEN := "restart"
+var GH_USERNAME : String  # REQUIRED: your GitHub Username
+var GH_REPO : String  # REQUIRED: name of the GitHub repo you would like to reference
+var GH_TOKEN : String
 
 var popup_TSCN = preload("res://addons/GitProjectData/AccessTokenPopup.tscn")
 var refresh_timer := Timer.new()
 
 
 func _enter_tree():
-	var ERR = get_gh_token()
+	var ERR = yield(get_gh_info(), "completed")
 	
 	if ERR == ERR_PRINTER_ON_FIRE:
 		print("Cancel GitProjectData Plugin. Toggle enable to try again.")
@@ -32,13 +32,6 @@ func _enter_tree():
 	refresh_timer.connect("timeout", self, "refresh_dir")
 	refresh_timer.set_autostart(true)
 	
-
-	var dir = Directory.new()
-	if !dir.dir_exists(INTERNAL_DATA):
-		dir.make_dir_recursive(INTERNAL_DATA)
-	if !dir.dir_exists(EXTERNAL_DATA):
-		dir.make_dir_recursive(EXTERNAL_DATA)
-	
 	refresh_dir()
 
 func _exit_tree():
@@ -46,7 +39,7 @@ func _exit_tree():
 	refresh_timer.queue_free()
 
 
-func get_gh_token():
+func get_gh_info():
 	var cfg := ConfigFile.new()
 	# just so its not visible on github
 	var ERR = cfg.load_encrypted_pass(GH_TOKEN_PATH, "godot")
@@ -54,20 +47,31 @@ func get_gh_token():
 		var popup = popup_TSCN.instance()
 		get_tree().root.add_child(popup)
 		popup.popup_centered()
-		var token = yield(popup, "token_entered")
-		if token == "EXIT":
+		var info = yield(popup, "info_entered")
+		if typeof(info) == TYPE_STRING:
 			return ERR_PRINTER_ON_FIRE
-		if yield(get_latest_commit(token), "completed"):
-			cfg.set_value("token", "token", token)
-			cfg.save_encrypted_pass(GH_TOKEN_PATH, "godot")
-			GH_TOKEN = token
-			return OK
-		else:
-			return get_gh_token()
+		elif typeof(info) == TYPE_DICTIONARY:
+			GH_USERNAME = info.get("Username")
+			GH_REPO = info.get("Repository Name")
+			
+			var token = info.get("Personal Access Token")
+			if yield(get_latest_commit(token), "completed"):
+				cfg.set_value("username", "username", GH_USERNAME)
+				cfg.set_value("repo", "repo", GH_REPO)
+				cfg.set_value("token", "token", token)
+				cfg.save_encrypted_pass(GH_TOKEN_PATH, "godot")
+				GH_TOKEN = token
+				return OK
+			else:
+				get_gh_info()
+				return ERR
 	elif ERR != OK:
 		push_error("Unable to retrieve token from cfg with ERR: " + ERR)
 		return ERR
 	else:
+		yield(get_tree().create_timer(0.01), "timeout")
+		GH_USERNAME = cfg.get_value("username", "username")
+		GH_REPO = cfg.get_value("repo", "repo")
 		GH_TOKEN = cfg.get_value("token", "token")
 		return OK
 
@@ -90,7 +94,14 @@ func get_latest_commit(token:String) -> String:
 	
 	var response = yield(http_request, "request_completed")
 	if response[1] != 200:
-		print(response[3].get_string_from_utf8())
+		var ERR_MESSAGE = parse_json(response[3].get_string_from_utf8()).get("message")
+		print(
+			"""
+			GitHub is returning a %s error.
+			Please try disabling/re-enabling the plugin
+			""" % ERR_MESSAGE,
+			"currently, GH_USERNAME = %s and GH_REPO = %s" % [GH_USERNAME, GH_REPO]
+			)
 		return ""
 	
 	return parse_json(response[3].get_string_from_utf8())[0].get("sha")
@@ -127,8 +138,14 @@ func is_new_version() -> bool:
 
 
 func refresh_dir() -> void:
-	if GH_TOKEN == "restart":
-		get_gh_token()
+	if !GH_TOKEN:
+		get_gh_info()
+	
+	var dir = Directory.new()
+	if !dir.dir_exists(INTERNAL_DATA):
+		dir.make_dir_recursive(INTERNAL_DATA)
+	if !dir.dir_exists(EXTERNAL_DATA):
+		dir.make_dir_recursive(EXTERNAL_DATA)
 	
 	if yield(is_new_version(), "completed"):
 #		print("copy int to ext")
